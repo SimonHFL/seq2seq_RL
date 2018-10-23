@@ -35,8 +35,9 @@ def run(experiment):
     
     ### prepare data ###
     (train_source_int_text, train_target_int_text), (valid_source_int_text, valid_target_int_text), (
-            source_vocab_to_int, target_vocab_to_int), (source_int_to_vocab, target_int_to_vocab) = data_preprocessing.get_data()
-  
+            source_vocab_to_int, target_vocab_to_int), (source_int_to_vocab, target_int_to_vocab) = data_preprocessing.get_data(experiment.data["folder"], experiment.data["train_source_file"], experiment.data["train_target_file"], experiment.data["dev_source_file"], experiment.data["dev_target_file"])
+
+    
     max_source_sentence_length = max([len(sentence) for sentence in train_source_int_text])
 
     train_source = train_source_int_text
@@ -80,19 +81,27 @@ run_time = datetime.datetime.now().strftime("%d-%m_%H-%M")
 def run_mle_exps():
 
     max_hours = None
-    dataset = "en-fr"
     tokenization = "word"
     train_method = 'MLE'
     start_checkpoint = None
+
+    data = {
+        "folder": "data/en-fr/",
+        "train_source_file": 'train.fr.txt',
+        "train_target_file": 'train.en.txt',
+        "dev_source_file": 'dev.fr.txt',
+        "dev_target_file": 'dev.en.txt',
+    }
+
     
     hyperparams = {
         'epochs' : 10,
         'input_batch_size' : 128,# 128,
-        'rnn_size' : [256, 512],
+        'rnn_size' : 256,#[256, 512],
         'num_layers' : 3,
         'encoding_embedding_size' : 128,
         'decoding_embedding_size' : 128,
-        'learning_rate' : [0.0001, 0.0003],
+        'learning_rate' : 0.0001,#[0.0001, 0.0003],
         'keep_probability' : 0.8,
         'num_samples': None
     }
@@ -101,7 +110,7 @@ def run_mle_exps():
 
     for params, name in zip(param_permutations, exp_names):
         experiment_name = run_time + "_" + train_method+name
-        exp = Experiment(params, train_method, start_checkpoint, dataset, tokenization, experiment_name, max_hours)
+        exp = Experiment(params, train_method, start_checkpoint, data, tokenization, experiment_name, max_hours)
         run(exp)
 
 def run_reinf_exps():
@@ -111,8 +120,15 @@ def run_reinf_exps():
     start_checkpoint = tf.train.latest_checkpoint("checkpoints/09-11_13-27_MLE_rnn_size256_learning_rate0.0003")
     rnn_size = 256
     train_method = 'reinforce' #'reinforce_test'
-    dataset = "en-fr"
     tokenization = "word"
+
+    data = {
+        "folder": "data/en-fr/",
+        "train_source_file": 'train.fr.txt',
+        "train_target_file": 'train.en.txt',
+        "dev_source_file": 'dev.fr.txt',
+        "dev_target_file": 'dev.en.txt',
+    }
 
     hyperparams = {
         'epochs' : 1,
@@ -131,8 +147,8 @@ def run_reinf_exps():
 
     for params, name in zip(param_permutations, exp_names):
         experiment_name = run_time + "_" + train_method+name
-        reinforce_exp = Experiment(params, train_method, start_checkpoint, dataset, tokenization, experiment_name, max_hours)
+        reinforce_exp = Experiment(params, train_method, start_checkpoint, data, tokenization, experiment_name, max_hours)
         run(reinforce_exp)
 
-#run_mle_exps()
-run_reinf_exps()
+run_mle_exps()
+#run_reinf_exps()

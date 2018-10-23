@@ -30,36 +30,25 @@ def text_to_ids(source_text, target_text, source_vocab_to_int, target_vocab_to_i
 
     return (source_id_text, target_id_text)
 
-def get_data(
-        train_source_path='data/train.x_official.txt',
-        train_target_path='data/train.y_official.txt',
-        valid_source_path='data/revised_conll13.input',
-        valid_target_path='data/revised_conll13.output',
-        enc_ngram_order_tokenization:int =None,
-        dec_ngram_order_tokenization:int =None,
-        pickle_path = ""):
+def get_data(folder, train_source_file, train_target_file, dev_source_file, dev_target_file, pickle_path = ""):
 
-    """
-    In case enc/dec_ngram_order_tokenization is None then word tokenization
-    """
-    word_token = not enc_ngram_order_tokenization
-    pickle_dump =  "preprocess_{}.p".format(
-        "word" if word_token else "ngram_" + str(enc_ngram_order_tokenization))
-    pickle_dump = pickle_path + pickle_dump
+
+    #pickle_dump =  "preprocess_{}.p".format(
+    #    "word" if word_token else "ngram_" + str(enc_ngram_order_tokenization))
+    pickle_dump = os.path.join(folder, "preprocessed.pickle")
+    
     if not os.path.exists(pickle_dump):
         helper.preprocess_and_save_data(
-            train_source_path, train_target_path, 
-            valid_source_path, valid_target_path, 
-            text_to_ids, out_file=pickle_dump,
-            enc_ngram_order=enc_ngram_order_tokenization, dec_ngram_order=dec_ngram_order_tokenization)
+            os.path.join(folder, train_source_file),
+            os.path.join(folder, train_target_file), 
+            os.path.join(folder, dev_source_file),
+            os.path.join(folder, dev_target_file), 
+            text_to_ids,
+            out_file=pickle_dump)
     else:
         print('Loads datasets from {}'.format(pickle_dump))
     return helper.load_preprocess(file=pickle_dump)
-    #Different datasets 
-    #source_path = 'data/small_vocab_en'
-    #target_path = 'data/small_vocab_en1'
-    #source_path = 'data/train.x_lang8.txt'
-    #target_path = 'data/train.y_lang8.txt'
+
 
 def get_test(test_source_file='data/test.x_official.txt',
              test_target_file='data/test.y_official.txt',
