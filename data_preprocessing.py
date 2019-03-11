@@ -2,7 +2,7 @@ import helper
 import numpy as np
 import os
 
-def text_to_ids(source_text, target_text, source_vocab_to_int, target_vocab_to_int):
+def text_to_ids(source_sentences, target_sentences, source_vocab_to_int, target_vocab_to_int):
     """
     Convert source and target text to proper word ids
     :param source_text: String that contains all the source text.
@@ -13,15 +13,13 @@ def text_to_ids(source_text, target_text, source_vocab_to_int, target_vocab_to_i
     """
     # TODO: Implement Function
 
-    source_sentences = source_text.split("\n")
-    source_sentences = [sentence.split(" ") for sentence in source_sentences]
-    # remove '' to avoid errors
+    #source_sentences = source_text.split("\n")
+    #source_sentences = [sentence.split(" ") for sentence in source_sentences]
+    # remove '' to avoid errors   
+
     source_sentences = [[word for word in sentence if word != ''] for sentence in source_sentences]
     source_id_text = [[source_vocab_to_int[word if word in source_vocab_to_int else '<UNK>'] for word in sentence] for sentence in source_sentences]
     
-    target_sentences = target_text.split("\n")
-    target_sentences = [sentence.split(" ") for sentence in target_sentences]
-    # remove '' to avoid errors
     target_sentences = [[word for word in sentence if word != ''] for sentence in target_sentences]
     target_id_text = [ [ target_vocab_to_int[word if word in target_vocab_to_int else '<UNK>'] for word in sentence] for sentence in target_sentences]
     target_id_text = [ sentence + [target_vocab_to_int['<EOS>']] for sentence in target_id_text]    
@@ -30,12 +28,12 @@ def text_to_ids(source_text, target_text, source_vocab_to_int, target_vocab_to_i
 
     return (source_id_text, target_id_text)
 
-def get_data(folder, train_source_file, train_target_file, dev_source_file, dev_target_file, pickle_path = ""):
+def get_data(dataset, folder, train_source_file, train_target_file, dev_source_file, dev_target_file, tokenization, pickle_path = ""):
 
 
     #pickle_dump =  "preprocess_{}.p".format(
     #    "word" if word_token else "ngram_" + str(enc_ngram_order_tokenization))
-    pickle_dump = os.path.join(folder, "preprocessed.pickle")
+    pickle_dump = "data/"+dataset+"_preprocessed.pickle" #os.path.join(folder, dataset + "_preprocessed.pickle")
     
     if not os.path.exists(pickle_dump):
         helper.preprocess_and_save_data(
@@ -44,24 +42,22 @@ def get_data(folder, train_source_file, train_target_file, dev_source_file, dev_
             os.path.join(folder, dev_source_file),
             os.path.join(folder, dev_target_file), 
             text_to_ids,
+            tokenization,
             out_file=pickle_dump)
     else:
         print('Loads datasets from {}'.format(pickle_dump))
     return helper.load_preprocess(file=pickle_dump)
 
+def get_test(test_source_file,
+             test_target_file,
+             pickle):
 
-def get_test(test_source_file='data/test.x_official.txt',
-             test_target_file='data/test.y_official.txt',
-             base_path="",
-             pickle=None):
-    pickle = base_path + 'preprocess_word.p' if pickle is None else pickle
+    _, _, (source_vocab_to_int, target_vocab_to_int), (source_int_to_vocab, target_int_to_vocab) = helper.load_preprocess(pickle)
 
-    _, _, (_, target_vocab_to_int), \
-    (_, target_int_to_vocab) = helper.load_preprocess(pickle)
+    test_source_text = helper.load_data(test_source_file).lower().split("\n")
+    test_target_text = helper.load_data(test_target_file).lower().split("\n")
 
-    test_source_text = helper.load_data(base_path+test_source_file).lower()
-    test_target_text = helper.load_data(base_path+test_target_file).lower()
-    return text_to_ids(test_source_text, test_target_text, target_vocab_to_int, target_vocab_to_int)
+    return text_to_ids(test_source_text, test_target_text, source_vocab_to_int, target_vocab_to_int)
 
 
 def get_vocab(source_path, target_path, valid_source_path, valid_target_path, vocab_size):

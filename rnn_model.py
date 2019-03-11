@@ -497,15 +497,13 @@ def get_reinf_loss(log_probs, advantages):
 
 class RNN:
     
-    def __init__(self, batch_size, max_source_sentence_length, source_vocab_to_int, target_vocab_to_int, encoding_embedding_size, decoding_embedding_size, rnn_size, num_layers, per_step_reward = True, trainable=True):
+    def __init__(self, batch_size, max_source_sentence_length, source_vocab_to_int, target_vocab_to_int, encoding_embedding_size, decoding_embedding_size, rnn_size, num_layers, trainable=True):
 
         #tf.reset_default_graph()
         self.max_sample_length = tf.placeholder(tf.int32, shape=None, name='max_sample_length')
         
-        if per_step_reward:
-            self.advantage = tf.placeholder(tf.float32, shape=(None, None), name='advantage')
-        else:
-            self.advantage = tf.placeholder(tf.float32, shape=(None), name='advantage')
+        
+        self.advantage = tf.placeholder(tf.float32, shape=(None), name='advantage')
 
         self.unique_sample_mask = tf.placeholder(tf.int32, shape=(None), name='unique_sample_mask')
         self.chosen_ids = tf.placeholder(tf.int32, shape=(batch_size,None), name='chosen_ids')
@@ -532,21 +530,13 @@ class RNN:
                     self.unique_sample_log_probs = tf.dynamic_partition(self.predefined_probs, self.unique_sample_mask, 2)[1]
                     self.unique_samples = tf.dynamic_partition(self.sample, self.unique_sample_mask, 2)[1]
 
-                    if per_step_reward:
-                        # get Q distribution of probs
-                        scaled_probs = tf.multiply(self.unique_sample_log_probs, 0.005)
-                        q_probs = tf.nn.softmax(scaled_probs, dim=0)
-
-                        masked_probs = mask_probs(q_probs,self.unique_samples)
-                        self.loss = - tf.reduce_sum(tf.multiply(masked_probs, self.advantage))
                     
-                    else: 
-                        masked_probs = mask_probs(self.unique_sample_log_probs,self.unique_samples)
-                        per_sample_probs = tf.reduce_sum(masked_probs, axis=-1)
+                    masked_probs = mask_probs(self.unique_sample_log_probs,self.unique_samples)
+                    per_sample_probs = tf.reduce_sum(masked_probs, axis=-1)
 
-                        log_probs = tf.multiply(per_sample_probs, 0.005)
-                        normalized_log_probs = tf.nn.softmax(log_probs)
-                        self.loss = -tf.reduce_sum(tf.multiply(normalized_log_probs,self.advantage))
+                    log_probs = tf.multiply(per_sample_probs, 0.005)
+                    normalized_log_probs = tf.nn.softmax(log_probs)
+                    self.loss = -tf.reduce_sum(tf.multiply(normalized_log_probs,self.advantage))
 
                     self.slow_train_op = optimizer.minimize(self.loss)
 

@@ -3,7 +3,6 @@ import pickle
 import copy
 import random
 from collections import Counter
-import mimic_utility_classes
 
 
 import numpy as np
@@ -20,63 +19,65 @@ def load_data(path):
         return f.read()
 
 
-def create_vocabulary(target_text: str, ngram_order: int=None, most_common=20000) -> (dict, dict):
-    if not ngram_order:
-        return _create_word_vocab(target_text, most_common)
-    else:
-        return _create_ngram_vocab(target_text, ngram_order)
+def create_vocabulary(target_text: str, tokenization: str, most_common=20000) -> (dict, dict):
 
-
-def _create_word_vocab(target_text, most_common):
     word2idx = copy.copy(CODES)
-    counter = Counter(target_text.lower().split())
+    if tokenization == "word":
+        words = [item for sentence in target_text for item in sentence]
+        counter = Counter(words)
+    elif tokenization == "char":
+        chars = [char for word in target_text for char in word]
+        counter = Counter(chars)
+
     for w, _ in counter.most_common(most_common - len(word2idx)):
         word2idx[w] = len(word2idx)
     idx2word = {idx: word for word, idx in word2idx.items()}
     return word2idx, idx2word
 
-def _create_ngram_vocab(target_text, ngram_order:int):
-    #TODO: Add glove_weights_or_maybe_not
-    dataPreprocessor = mimic_utility_classes.NgramTextProcessor(target_text, ngram_order=ngram_order)
-    return dataPreprocessor.ngram2idx, dataPreprocessor.idx2ngram
-
 
 def preprocess_and_save_data(train_source_path, train_target_path, valid_source_path,
-                             valid_target_path, text_to_ids, save=True, vocab_size=20000,
-                             out_file='preprocess.p', enc_ngram_order: int=None, dec_ngram_order: int=None):
+                             valid_target_path, text_to_ids, tokenization, save=True, vocab_size=20000,
+                             out_file='preprocess.p'):#, enc_ngram_order: int=None, dec_ngram_order: int=None):
     """
     Preprocess Text Data.  Save to to file.
     """
+
     print('Loading data files....')
     # Preprocess
-    train_source_text = load_data(train_source_path).lower()
-    train_target_text = load_data(train_target_path).lower()
-    valid_source_text = load_data(valid_source_path).lower()
-    valid_target_text = load_data(valid_target_path).lower()
-    source_target_text = train_source_text + "\n" + train_target_text
+    train_source_lines = load_data(train_source_path).lower().strip().split("\n")    
+    train_target_lines = load_data(train_target_path).lower().strip().split("\n")
+    valid_source_lines = load_data(valid_source_path).lower().strip().split("\n")
+    valid_target_lines = load_data(valid_target_path).lower().strip().split("\n")
 
+    if tokenization == 'word':
+        train_source_tokens = [ s.split() for s in train_source_lines]
+        train_target_tokens = [ s.split() for s in train_target_lines]
+        valid_source_tokens = [ s.split() for s in valid_source_lines]
+        valid_target_tokens = [ s.split() for s in valid_target_lines]
 
-    enc_source = source_target_text if enc_ngram_order else train_target_text
-    dec_source = source_target_text if dec_ngram_order else train_target_text
+    if tokenization == 'char':
+        train_source_tokens = [ [list(w) for w in s.split()][0] for s in train_source_lines]
+        train_target_tokens = [ [list(w) for w in s.split()][0] for s in train_target_lines]
+        valid_source_tokens = [ [list(w) for w in s.split()][0] for s in valid_source_lines]
+        valid_target_tokens = [ [list(w) for w in s.split()][0] for s in valid_target_lines]
 
-    print('Creating vocabulary, source: {}, target: {}'.format( 'word' if not enc_ngram_order else 'ngram', 'word' if not dec_ngram_order else 'ngram'))
-    source_word2idx, source_idx2word = create_vocabulary(enc_source, ngram_order=enc_ngram_order, most_common=vocab_size) 
-    target_word2idx, target_idx2word= create_vocabulary(dec_source, ngram_order=dec_ngram_order, most_common=vocab_size)
+    source_word2idx, source_idx2word = create_vocabulary(train_source_tokens, tokenization, most_common=vocab_size) 
+    target_word2idx, target_idx2word = create_vocabulary(train_target_tokens, tokenization, most_common=vocab_size)
 
-    train_source_text, train_target_text = text_to_ids(train_source_text, train_target_text,
+    train_source_ids, train_target_ids = text_to_ids(train_source_tokens, train_target_tokens,
                                                        source_word2idx, target_word2idx)
-    valid_source_text, valid_target_text = text_to_ids(valid_source_text, valid_target_text,
+    valid_source_ids, valid_target_ids = text_to_ids(valid_source_tokens, valid_target_tokens,
                                                        source_word2idx, target_word2idx)
 
     if save:
     # Save Data
         with open(out_file, 'wb') as of:
             pickle.dump((
-                (train_source_text, train_target_text),
-                (valid_source_text, valid_target_text),
+                (train_source_ids, train_target_ids),
+                (valid_source_ids, valid_target_ids),
                 (source_word2idx, target_word2idx), (source_idx2word, target_idx2word)), of)
     else:
-        return train_source_text, train_target_text, source_word2idx, source_idx2word
+        return train_source_ids, train_target_ids, source_word2idx, source_idx2word
 
 def load_preprocess(file = None):
     """
@@ -167,7 +168,7 @@ def permute_params(params):
                         
                 for i,d in enumerate(permutation):
                     d[k] = x
-                    name[i] += '_' + str(k)+str(x)
+                    name[i] += '_' + str(k)+"="+str(x)
                 
                 permutations+=permutation
                 names += name

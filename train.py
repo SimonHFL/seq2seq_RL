@@ -12,17 +12,23 @@ import helper
 import scipy
 import time 
 import csv
+import textdistance
+#from pylev3 import Levenshtein
+#import Levenshtein
 
 gleu_calc = GLEU()
 
-def seq_to_sentence(seq, int_to_vocab):
+def seq_to_sentence(seq, int_to_vocab, char_tokenization=False):
     """
     Convert a sequence of ids to a sentence
     :param sentence: String
     :param int_to_vocav: Dictionary to go from the ids to words
     :return: the sentence string
     """
-    return ' '.join(word for word in [int_to_vocab[i] for i in seq] if word != '<PAD>'and word != '<EOS>')
+    if char_tokenization:
+        return ''.join(word for word in [int_to_vocab[i] for i in seq] if word != '<PAD>'and word != '<EOS>')
+    else:
+        return ' '.join(word for word in [int_to_vocab[i] for i in seq] if word != '<PAD>'and word != '<EOS>')
 
 def sentence_to_seq(sentence, vocab_to_int):
     """
@@ -40,12 +46,13 @@ def ints_to_sentence(ints, target_int_to_vocab):
     sentence = ' '.join(word for word in words if word != '<PAD>'and word != '<EOS>')
     return sentence
 
-def get_avg_reward(hypotheses, references, sources, target_int_to_vocab):
+def get_avg_reward(hypotheses, references, sources, target_int_to_vocab, source_int_to_vocab):
+    
     rewards = []
     for ref, hyp, source in zip(references, hypotheses, sources):
         ref_sent = ints_to_sentence(ref, target_int_to_vocab)
         hyp_sent = ints_to_sentence(hyp, target_int_to_vocab)
-        source_sent = ints_to_sentence(source, target_int_to_vocab)
+        source_sent = ints_to_sentence(source, source_int_to_vocab)
         rewards.append(get_reward(ref_sent, hyp_sent, source_sent))
 
     mean = np.mean(rewards)
@@ -55,71 +62,27 @@ def get_avg_reward(hypotheses, references, sources, target_int_to_vocab):
     return mean, std, ci_low, ci_high
     
 def get_reward(reference, hypothesis, source):
-    return gleu_calc.sentence_gleu(hypothesis, reference, source)
-
-def get_advantages_per_step(candidates, reference, source, target_int_to_vocab):
+    #return gleu_calc.sentence_gleu(hypothesis, reference, source)
+    try:
+        reward = reward_function((reference, hypothesis))
+    except:
+        return - textdistance.levenshtein(reference, hypothesis)   
+        #return - Levenshtein.distance(reference, hypothesis)
+    #print("reward",reward)
+    return reward
     
-    def smooth(advantages, full_advantages, hyp_lens, alpha):
-        smoothed_advantages = []
-        # per step mean full advantage
-        step_avg_full_advantages = [x/y for x,y in zip(full_advantages, hyp_lens)] 
-
-        for i, step_advs in enumerate(advantages):
-            smoothed = [ step_avg_full_advantages[i] * alpha + x * (1-alpha) for x in step_advs]
-            smoothed_advantages.append(smoothed)
-
-        return np.array(smoothed_advantages)
-
-    if not isinstance(reference, str):
-        reference_words = [target_int_to_vocab[j] for j in reference]
-        reference = ' '.join(word for word in reference_words if word != '<PAD>'and word != '<EOS>')
- 
-    if not isinstance(source, str):
-        source_words = [target_int_to_vocab[j] for j in source]
-        source = ' '.join(word for word in source_words if word != '<PAD>'and word != '<EOS>')
- 
-    all_diffs = []
-    rewards = []
-    hyp_lens = []
-    for candidate in candidates:
-        per_step_score = gleu_calc.sentence_gleu_per_step(candidate, reference, source)
-        diffs = [x-y for x, y in zip(per_step_score, [0] + per_step_score[:-1])] 
-        rewards.append(sum(diffs))
-        hyp_lens.append(len(diffs))
-        all_diffs.append(diffs)
-
-    pad = len(max(all_diffs, key=len))
-    all_diffs = np.array([i + [0]*(pad-len(i)) for i in all_diffs])
+    #lev_dist = Levenshtein.distance(reference, hypothesis)
     
-    advantages = (all_diffs - np.mean(all_diffs, axis=0))
-    std = np.std(all_diffs, axis=0)
-    std[std == 0] = 1 # fix for div by 0
-    advantages /= std
+    #return - lev_dist
 
-    # smooth
-    avg_reward = sum(rewards)/len(rewards)
-    
-    std_dev = np.array(rewards).std()
-
-    # fix for div by zero
-    if std_dev == 0:
-        full_advantages = np.array([(x-avg_reward) for x in rewards])
-    else: 
-        full_advantages = np.array([(x-avg_reward)/std_dev for x in rewards])
-
-    advantages = smooth(advantages, full_advantages, hyp_lens, 1)
-
-
-    return advantages, avg_reward
-
-def get_advantages(samples, reference, source, target_int_to_vocab):
+def get_advantages(samples, reference, source, target_int_to_vocab, source_int_to_vocab):
     
     if not isinstance(reference, str):
         reference_words = [target_int_to_vocab[j] for j in reference]
         reference = ' '.join(word for word in reference_words if word != '<PAD>'and word != '<EOS>')
  
     if not isinstance(source, str):
-        source_words = [target_int_to_vocab[j] for j in source]
+        source_words = [source_int_to_vocab[j] for j in source]
         source = ' '.join(word for word in source_words if word != '<PAD>'and word != '<EOS>')
 
     rewards = [get_reward(reference, sample, source) for sample in samples]
@@ -152,7 +115,7 @@ def filter_duplicate_sentences(sentences):
     return unique_sentences, unique_sentence_idxs
 
 
-def reinforce_on_sentence(model, max_length, n_samples, source, reference, learning_rate, keep_prob, sess, target_int_to_vocab, per_step_reward, accum_gradient = True):
+def reinforce_on_sentence(model, max_length, n_samples, source, reference, learning_rate, keep_prob, sess, target_int_to_vocab, source_int_to_vocab, accum_gradient = True):
     """
     outputs = [model.sample, model.probs, model.loss, model.accum_ops]
     inputs = [model.input_data, model.keep_prob, model.lr, model.advantage]
@@ -190,15 +153,8 @@ def reinforce_on_sentence(model, max_length, n_samples, source, reference, learn
     for idx in unique_sample_idxs:
         unique_sample_mask[idx] = 1
     
-    if per_step_reward:
-        advantages, avg_reward = get_advantages_per_step(unique_samples, reference, source, target_int_to_vocab)
-        
-        # pad advantages as they could be shorter than outputs
-        advantages_pad = np.zeros([len(unique_samples), max_length])
-        advantages_pad[:advantages.shape[0],:advantages.shape[1]] = advantages
-        advantages_input = advantages_pad
-    else:
-        advantages_input, avg_reward = get_advantages(unique_samples, reference, source, target_int_to_vocab)
+  
+    advantages_input, avg_reward = get_advantages(unique_samples, reference, source, target_int_to_vocab, source_int_to_vocab)
 
     if accum_gradient:
         train_op = model.accum_ops
@@ -226,7 +182,7 @@ def get_n_most_likely_samples(n, samples, probs):
     top_idxs = probs.argsort()[-n:][::-1]
     return samples[top_idxs], probs[top_idxs]
 
-def eval_validation_set(valid_source, valid_target, batch_size, model, sess, target_int_to_vocab, limit = None):
+def eval_validation_set(valid_source, valid_target, batch_size, model, sess, target_int_to_vocab, source_int_to_vocab, limit = None):
 
     if limit is not None:
         valid_target = valid_target[:limit]
@@ -244,6 +200,7 @@ def eval_validation_set(valid_source, valid_target, batch_size, model, sess, tar
 
     # evaluate batch wise
     for val_batch_start_i in range(0, len(valid_source), batch_size):
+        print(val_batch_start_i, batch_size)
         val_target_batch = valid_target[val_batch_start_i:val_batch_start_i + batch_size]
         val_source_batch = valid_source[val_batch_start_i:val_batch_start_i + batch_size]
         
@@ -276,7 +233,7 @@ def eval_validation_set(valid_source, valid_target, batch_size, model, sess, tar
         outputs.append(out)
     
     preds = np.concatenate(outputs)    
-    avg_reward, std, ci_low, ci_high = get_avg_reward(preds, valid_target, valid_source, target_int_to_vocab)
+    avg_reward, std, ci_low, ci_high = get_avg_reward(preds, valid_target, valid_source, target_int_to_vocab, source_int_to_vocab)
 
     # do weighted average
     weights = [x / len(valid_source) for x in batch_sizes]
@@ -289,9 +246,9 @@ def log_eval(line, file):
         writer = csv.writer(csv_file, delimiter=',')
         writer.writerow(line)
 
-def eval_full(train_writer, eval_model, eval_batch_size, step, sess, valid_source, valid_target, target_int_to_vocab, log_file):
+def eval_full(train_writer, eval_model, eval_batch_size, step, sess, valid_source, valid_target, target_int_to_vocab, source_int_to_vocab, log_file, save = True):
 
-    acc, avg_reward, reward_std, reward_ci_low, reward_ci_high, _ = eval_validation_set(valid_source, valid_target, eval_batch_size, eval_model, sess, target_int_to_vocab)
+    acc, avg_reward, reward_std, reward_ci_low, reward_ci_high, _ = eval_validation_set(valid_source, valid_target, eval_batch_size, eval_model, sess, target_int_to_vocab, source_int_to_vocab)
 
     summary = sess.run(
         eval_model.merged_epoch_summaries,
@@ -300,13 +257,19 @@ def eval_full(train_writer, eval_model, eval_batch_size, step, sess, valid_sourc
         }
     )
 
-    train_writer.add_summary(summary, step)
-    log_eval([step, acc, avg_reward, reward_std, reward_ci_low, reward_ci_high], log_file)
-    print("acc: ", str(acc), "reward: ", str(avg_reward))
+    if save: 
+        train_writer.add_summary(summary, step)
+        log_eval([step, acc, avg_reward, reward_std, reward_ci_low, reward_ci_high], log_file)
+        print("acc: ", str(acc), "reward: ", str(avg_reward))
+    return acc
 
-def train(experiment_name, method, model, epochs, input_batch_size, train_source, train_target, valid_source, valid_target, learning_rate, keep_probability, save_path, start_checkpoint, target_int_to_vocab, source_vocab_to_int, log_dir, graph_batch_size, per_step_reward, max_hours, eval_model, eval_batch_size):
+def train(experiment_name, method, model, epochs, input_batch_size, train_source, train_target, valid_source, valid_target, learning_rate, keep_probability, save_path, start_checkpoint, target_int_to_vocab, source_int_to_vocab, source_vocab_to_int, log_dir, graph_batch_size, max_hours, eval_model, eval_batch_size, reward_func, early_stopping = False):
 
     print("training...")
+
+    # FIX
+    global reward_function
+    reward_function = reward_func
 
     tf.set_random_seed(1234)
 
@@ -331,6 +294,8 @@ def train(experiment_name, method, model, epochs, input_batch_size, train_source
     log_eval(['step', 'acc', 'reward', 'reward_std', 'ci_low', 'ci_high'], log_file) # log header
     start_time = time.time()
 
+    best_valid_acc = 0.
+
     with tf.Session() as sess:
 
         if start_checkpoint is not None:
@@ -348,12 +313,12 @@ def train(experiment_name, method, model, epochs, input_batch_size, train_source
                         break
             
             if full_eval_frequency == 'epoch': # evaluate full dev set
-                eval_full(train_writer, eval_model, eval_batch_size, epoch_i, sess, valid_source, valid_target, target_int_to_vocab, log_file)
+                eval_full(train_writer, eval_model, eval_batch_size, epoch_i, sess, valid_source, valid_target, target_int_to_vocab, source_int_to_vocab, log_file)
          
             for batch_i, (source_batch, target_batch) in enumerate(helper.batch_data(train_source, train_target, input_batch_size)):
                 
                 if full_eval_frequency != 'epoch' and batch_i % full_eval_frequency == 0:
-                    eval_full(train_writer, eval_model, eval_batch_size, global_step, sess, valid_source, valid_target, target_int_to_vocab, log_file)
+                    eval_full(train_writer, eval_model, eval_batch_size, global_step, sess, valid_source, valid_target, target_int_to_vocab, source_int_to_vocab, log_file)
                     saver.save(sess, save_path=save_path, global_step=global_step)
        
                 if max_hours is not None:                    
@@ -378,14 +343,14 @@ def train(experiment_name, method, model, epochs, input_batch_size, train_source
 
                     for source, target in zip(source_batch, target_batch):
                         # add gradient for sentence
-                        avg_reward, loss, samples, probs = reinforce_on_sentence(model, len(target), graph_batch_size, source, target, learning_rate, keep_probability, sess, target_int_to_vocab, per_step_reward)
+                        avg_reward, loss, samples, probs = reinforce_on_sentence(model, len(target), graph_batch_size, source, target, learning_rate, keep_probability, sess, target_int_to_vocab, source_int_to_vocab)
                     # update based on accumlated gradients
                     sess.run(model.update_batch, {model.lr: learning_rate})
 
 
                 if batch_i % small_eval_frequency == 0: 
             
-                    valid_acc, avg_valid_reward, reward_std, reward_ci_low, reward_ci_high, _ = eval_validation_set(valid_source, valid_target, eval_batch_size, eval_model, sess, target_int_to_vocab, small_eval_size)
+                    valid_acc, avg_valid_reward, reward_std, reward_ci_low, reward_ci_high, _ = eval_validation_set(valid_source, valid_target, eval_batch_size, eval_model, sess, target_int_to_vocab, source_int_to_vocab, small_eval_size)
 
                     curr_time = time.strftime("%H:%M:%S", time.localtime())
                     output = experiment_name + ': Epoch {:>3} Batch {:>4}/{} - Validation Accuracy: {:>6.3f}, Loss: {:>6.3f}, Val Reward: {:>6.3f}, time: {}'.format(epoch_i, batch_i, len(train_source) // input_batch_size, valid_acc, loss, avg_valid_reward, curr_time)
@@ -412,7 +377,12 @@ def train(experiment_name, method, model, epochs, input_batch_size, train_source
 
                 global_step += 1
 
-            if method == 'MLE' and epoch_i % save_every_x_epoch == 0: 
+            if method == 'MLE' and early_stopping:
+                valid_acc = eval_full(train_writer, eval_model, eval_batch_size, epoch_i, sess, valid_source, valid_target, target_int_to_vocab, source_int_to_vocab, log_file, False)
+                if valid_acc > best_valid_acc:
+                    best_valid_acc = valid_acc
+                    saver.save(sess, save_path=save_path, global_step=epoch_i)
+            elif method == 'MLE' and epoch_i % save_every_x_epoch == 0: 
                 saver.save(sess, save_path=save_path, global_step=epoch_i)
 
         # eval final model  
@@ -421,13 +391,17 @@ def train(experiment_name, method, model, epochs, input_batch_size, train_source
         else:
             step = global_step
 
-        eval_full(train_writer, eval_model, eval_batch_size, step, sess, valid_source, valid_target, target_int_to_vocab, log_file)
+        valid_acc = eval_full(train_writer, eval_model, eval_batch_size, step, sess, valid_source, valid_target, target_int_to_vocab, source_int_to_vocab, log_file)
 
-        # Save Model
-        saver.save(sess, save_path, global_step = step)
+        if method == 'MLE' and early_stopping:
+            if valid_acc > best_valid_acc:
+                saver.save(sess, save_path, global_step = step)
+        else:
+            # Save Model
+            saver.save(sess, save_path, global_step = step)
         print('Model Trained and Saved')
         
-def reinforce_test(model, checkpoint, source_vocab_to_int, learning_rate, keep_probability, batch_size, target_int_to_vocab,valid_source, valid_target, per_step_reward):
+def reinforce_test(model, checkpoint, source_vocab_to_int, learning_rate, keep_probability, batch_size, target_int_to_vocab, source_int_to_vocab, valid_source, valid_target):
 
     on_batch = False
 
@@ -451,7 +425,7 @@ def reinforce_test(model, checkpoint, source_vocab_to_int, learning_rate, keep_p
 
                 for source, target in zip(source_batch, target_batch):
                     # add gradient for sentence
-                    avg_reward, loss, samples, probs = reinforce_on_sentence(model, len(target), batch_size, source, target, learning_rate, keep_probability, sess, target_int_to_vocab, per_step_reward)
+                    avg_reward, loss, samples, probs = reinforce_on_sentence(model, len(target), batch_size, source, target, learning_rate, keep_probability, sess, target_int_to_vocab, source_int_to_vocab)
                 # update based on accumlated gradients
                 sess.run(model.update_batch, {model.lr: learning_rate})
 
@@ -469,7 +443,7 @@ def reinforce_test(model, checkpoint, source_vocab_to_int, learning_rate, keep_p
                 target = "safety is one of the crucial problems that many countries and companies are concerned about ."
                 source = sentence_to_seq(source_sen, source_vocab_to_int)
          
-                avg_reward, loss, samples, probability = reinforce_on_sentence(model, 16, batch_size, source, target, learning_rate, keep_probability, sess, target_int_to_vocab, per_step_reward, accum_gradient = False)
+                avg_reward, loss, samples, probability = reinforce_on_sentence(model, 16, batch_size, source, target, learning_rate, keep_probability, sess, target_int_to_vocab, source_int_to_vocab, accum_gradient = False)
                 
                 if epoch_i % 1 == 0: 
                     print("avg reward", avg_reward)
